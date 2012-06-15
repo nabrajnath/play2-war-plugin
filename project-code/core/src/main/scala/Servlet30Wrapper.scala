@@ -21,6 +21,7 @@ import scala.collection.JavaConverters._
 
 object Servlet30Wrapper {
   var playServer: Play2WarServer = null
+  var servletContext: ServletContext = null
 }
 
 @WebServlet(name = "Play", urlPatterns = Array { "/" }, asyncSupported = true)
@@ -28,10 +29,10 @@ object Servlet30Wrapper {
 class Servlet30Wrapper extends HttpServlet with ServletContextListener with Helpers {
 
   protected override def service(servletRequest: HttpServletRequest, servletResponse: HttpServletResponse) = {
-    Logger("play").trace("HTTP request received: " + servletRequest)
+    trace("HTTP request received: " + servletRequest)
 
     val aSyncContext = servletRequest.startAsync
-    
+
     // Disable timeout for long-polling
     aSyncContext.setTimeout(-1)
 
@@ -58,7 +59,7 @@ class Servlet30Wrapper extends HttpServlet with ServletContextListener with Help
         super.toString + "\nPath: " + path + "\nParameters: " + queryString + "\nHeaders: " + headers + "\nCookies: " + rCookies
       }
     }
-    Logger("play").trace("HTTP request content: " + requestHeader)
+    trace("HTTP request content: " + requestHeader)
 
     // converting servlet response to play's
     val response = new Response {
@@ -75,13 +76,13 @@ class Servlet30Wrapper extends HttpServlet with ServletContextListener with Help
               case AsyncResult(p) => p.extend1 {
                 case Redeemed(v) => handle(v)
                 case Thrown(e) => {
-                  Logger("play").error("Waiting for a promise, but got an error: " + e.getMessage, e)
+                  error("Waiting for a promise, but got an error: " + e.getMessage, e)
                   handle(Results.InternalServerError)
                 }
               }
 
               case r @ SimpleResult(ResponseHeader(status, headers), body) => {
-                Logger("play").trace("Sending simple result: " + r)
+                trace("Sending simple result: " + r)
 
                 httpResponse.setStatus(status)
 
@@ -99,14 +100,14 @@ class Servlet30Wrapper extends HttpServlet with ServletContextListener with Help
 
                 // Stream the result
                 headers.get(CONTENT_LENGTH).map { contentLength =>
-                  Logger("play").trace("Result with Content-length: " + contentLength)
+                  trace("Result with Content-length: " + contentLength)
 
                   val writer: Function1[r.BODY_CONTENT, Promise[Unit]] = x => {
                     Promise.pure(
                       {
                         aSyncContext.getResponse.getOutputStream.write(r.writeable.transform(x))
                         aSyncContext.getResponse.getOutputStream.flush
-                      }).extend1 { case Redeemed(()) => (); case Thrown(ex) => Logger("play").debug(ex.toString) }
+                      }).extend1 { case Redeemed(()) => (); case Thrown(ex) => debug(ex.toString) }
                   }
 
                   val bodyIteratee = {
@@ -120,7 +121,7 @@ class Servlet30Wrapper extends HttpServlet with ServletContextListener with Help
 
                   body(bodyIteratee)
                 }.getOrElse {
-                  Logger("play").trace("Result without Content-length")
+                  trace("Result without Content-length")
 
                   // No Content-Length header specified, buffer in-memory
                   val byteBuffer = new ByteArrayOutputStream
@@ -130,7 +131,7 @@ class Servlet30Wrapper extends HttpServlet with ServletContextListener with Help
 
                   p.flatMap(i => i.run)
                     .onRedeem { buffer =>
-                      Logger("play").trace("Buffer size to send: " + buffer.size)
+                      trace("Buffer size to send: " + buffer.size)
                       aSyncContext.getResponse.setContentLength(buffer.size)
                       aSyncContext.getResponse.getOutputStream.flush
                       buffer.writeTo(aSyncContext.getResponse.getOutputStream)
@@ -140,7 +141,7 @@ class Servlet30Wrapper extends HttpServlet with ServletContextListener with Help
               }
 
               case r @ ChunkedResult(ResponseHeader(status, headers), chunks) => {
-                Logger("play").trace("Sending chunked result: " + r)
+                trace("Sending chunked result: " + r)
 
                 httpResponse.setStatus(status)
 
@@ -161,7 +162,7 @@ class Servlet30Wrapper extends HttpServlet with ServletContextListener with Help
                     {
                       aSyncContext.getResponse.getOutputStream.write(r.writeable.transform(x))
                       aSyncContext.getResponse.getOutputStream.flush
-                    }).extend1 { case Redeemed(()) => (); case Thrown(ex) => Logger("play").debug(ex.toString) }
+                    }).extend1 { case Redeemed(()) => (); case Thrown(ex) => debug(ex.toString) }
                 }
 
                 val chunksIteratee = {
@@ -177,8 +178,8 @@ class Servlet30Wrapper extends HttpServlet with ServletContextListener with Help
               }
 
               case defaultResponse @ _ =>
-                Logger("play").trace("Default response: " + defaultResponse)
-                Logger("play").error("Unhandle default response: " + defaultResponse)
+                trace("Default response: " + defaultResponse)
+                error("Unhandle default response: " + defaultResponse)
 
                 httpResponse.setContentLength(0);
                 httpResponse.sendError(HttpServletResponse.SC_INTERNAL_SERVER_ERROR)
@@ -187,7 +188,7 @@ class Servlet30Wrapper extends HttpServlet with ServletContextListener with Help
 
           } // end case HttpServletResponse
 
-          case unexpected => Logger("play").error("Oops, unexpected message received in Play server (please report this problem): " + unexpected)
+          case unexpected => error("Oops, unexpected message received in Play server (please report this problem): " + unexpected)
 
         } // end match getResponse
       } // end handle method
@@ -201,7 +202,7 @@ class Servlet30Wrapper extends HttpServlet with ServletContextListener with Help
       //execute normal action
       case Right((action: Action[_], app)) => {
 
-        Logger("play").trace("Serving this request with: " + action)
+        trace("Serving this request with: " + action)
 
         val bodyParser = action.parser
 
@@ -222,7 +223,7 @@ class Servlet30Wrapper extends HttpServlet with ServletContextListener with Help
                   (_, _) => Promise.pure(()))
 
               }
-              case _ => Logger("play").trace("Expect header:" + requestHeader.headers.get("Expect"))
+              case _ => trace("Expect header:" + requestHeader.headers.get("Expect"))
             }
 
             lazy val bodyEnumerator = {
@@ -256,15 +257,15 @@ class Servlet30Wrapper extends HttpServlet with ServletContextListener with Help
 
         eventuallyResultOrRequest.extend(_.value match {
           case Redeemed(Left(result)) => {
-            Logger("play").trace("Got direct result from the BodyParser: " + result)
+            trace("Got direct result from the BodyParser: " + result)
             response.handle(result)
           }
           case Redeemed(Right(request)) => {
-            Logger("play").trace("Invoking action with request: " + request)
+            trace("Invoking action with request: " + request)
             server.invoke(request, response, action.asInstanceOf[Action[action.BODY_CONTENT]], app)
           }
           case error => {
-            Logger("play").error("Cannot invoke the action, eventually got an error: " + error)
+            this.error("Cannot invoke the action, eventually got an error: " + error)
             response.handle(Results.InternalServerError)
           }
         })
@@ -273,12 +274,12 @@ class Servlet30Wrapper extends HttpServlet with ServletContextListener with Help
 
       //handle websocket action
       case Right((ws @ WebSocket(f), app)) => {
-        Logger("play").error("Impossible to serve Web Socket request:" + ws)
+        error("Impossible to serve Web Socket request:" + ws)
         response.handle(Results.InternalServerError)
       }
 
       case unexpected => {
-        Logger("play").error("Oops, unexpected message received in Play server (please report this problem): " + unexpected)
+        error("Oops, unexpected message received in Play server (please report this problem): " + unexpected)
         response.handle(Results.InternalServerError)
       }
     }
@@ -286,13 +287,23 @@ class Servlet30Wrapper extends HttpServlet with ServletContextListener with Help
   }
 
   override def contextInitialized(e: ServletContextEvent) = {
-    e.getServletContext.log("PlayServletWrapper > contextInitialized")
+    import play.core.server.servlet.Servlet30Wrapper._
 
-    Logger.configure(Map.empty, Map.empty, Mode.Prod)
+    servletContext = e.getServletContext
 
-    val classLoader = getClass.getClassLoader;
+    servletContext.log("PlayServletWrapper > contextInitialized")
+    
+    servletContext.log("PlayServletWrapper > contextInitialized (2)")
 
-    Servlet30Wrapper.playServer = new Play2WarServer(new WarApplication(classLoader, Mode.Prod))
+//    Logger.configure(Map.empty, Map.empty, Mode.Prod)
+    
+    servletContext.log("PlayServletWrapper > contextInitialized (3)")
+
+    val classLoader = this.getClass.getClassLoader;
+
+    playServer = new Play2WarServer(new WarApplication(classLoader, Mode.Prod))
+    
+    servletContext.log("PlayServletWrapper > contextInitialized (4)")
   }
 
   override def contextDestroyed(e: ServletContextEvent) = {
@@ -314,5 +325,35 @@ class Servlet30Wrapper extends HttpServlet with ServletContextListener with Help
         Servlet30Wrapper.playServer = null
         sc.log("Play server stopped")
     } // if playServer is null, nothing to do
+  }
+
+  private def trace(message: => String) {
+    Logger("play").trace(message)
+    Servlet30Wrapper.servletContext.log("[TRACE] " + message)
+  }
+
+  private def debug(message: => String) {
+    Logger("play").debug(message)
+    Servlet30Wrapper.servletContext.log("[DEBUG] " + message)
+  }
+
+  private def info(message: => String) {
+    Logger("play").info(message)
+    Servlet30Wrapper.servletContext.log("[INFO]  " + message)
+  }
+
+  private def error(message: => String) {
+    Logger("play").error(message)
+    Servlet30Wrapper.servletContext.log("[ERROR] " + message)
+  }
+
+  private def error(message: => String, error: => Throwable) {
+    Logger("play").error(message, error)
+    Servlet30Wrapper.servletContext.log("[ERROR] " + message + "\n" + error)
+  }
+
+  private def warn(message: => String) {
+    Logger("play").warn(message)
+    Servlet30Wrapper.servletContext.log("[WARN]  " + message)
   }
 }

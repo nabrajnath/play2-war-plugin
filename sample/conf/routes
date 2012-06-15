@@ -32,6 +32,6 @@ GET     /clock                      controllers.Application.liveClock
 GET     /assets/*file               controllers.Assets.at(path="/public", file)
 
 
-GET     /computers/new              controllers.JApplication.create
-GET     /computers/:id              controllers.JApplication.find(id:Long)
+#GET     /computers/new              controllers.JApplication.create
+#GET     /computers/:id              controllers.JApplication.find(id:Long)
 #POST	/computers/:id/delete       controllers.JApplication.delete(id:Long)
