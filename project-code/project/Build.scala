@@ -1,8 +1,34 @@
 import sbt._
 import Keys._
 import java.io.File
+import sbt.Defaults._
 
 object Build extends Build {
+
+  val packageServlet3x = TaskKey[File]("package-servlet3x")
+  
+  val packageServlet2x = TaskKey[File]("package-servlet2x")
+
+  val packageServletSettings = packageTasks(packageServlet3x, mappings in (Compile, packageBin)) ++ packageTasks(packageServlet2x, mappings in (Compile, packageBin)) ++ Seq(
+/*    publishArtifact in (Compile, packageBin) := false,*/
+    
+    mappings in packageServlet3x ~= { (ms: Seq[(File,String)]) =>
+      ms.filter { case (file, path) => 
+        file.getAbsolutePath.contains("servlet3x")
+      }
+    },
+    mappings in packageServlet2x ~= { (ms: Seq[(File,String)]) =>
+      ms.filter { case (file, path) => 
+        file.getAbsolutePath.contains("servlet2x")
+      }
+    },
+    artifactName in (Compile, packageServlet3x)  := { (config: String, module: ModuleID, artifact: Artifact) =>
+      artifact.name + "-" + module.revision + "." + artifact.extension + ".bidule"
+    },
+    artifact in (Compile, packageServlet3x) ~= { (art: Artifact) => 
+      art.copy(`type` = "truc", extension = "truc") 
+    }
+  )
 
   val play2Version = "2.0.1"
 
@@ -20,7 +46,8 @@ object Build extends Build {
     base = file("core"),
     settings = commonSettings ++ Seq(
       sbtPlugin := false,
-      libraryDependencies ++= Seq("play" %% "play" % play2Version % "provided->default")))
+      libraryDependencies ++= Seq("play" %% "play" % play2Version % "provided->default"))
+  ).settings(packageServletSettings: _*)
 
   lazy val play2WarPlugin = Project(id = "play2-war-plugin",
     base = file("plugin"),
